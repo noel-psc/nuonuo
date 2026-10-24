@@ -1,0 +1,22 @@
+# 只保留构建所需内容，缩小构建上下文
+.git
+.github
+.venv
+__pycache__
+*.py[cod]
+.ruff_cache
+
+# 运行时数据与登录态（前导 / 限定为仓库根目录，避免误伤 deploy/napcat/）
+/data
+/napcat
+*.log
+
+# 本地配置与密钥（.env.example 保留供参考）
+.env
+.env.*
+!.env.example
+
+# 文档、部署脚本与本地构建 override 不参与镜像构建
+README.md
+deploy
+docker-compose.build.yml

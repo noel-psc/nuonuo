@@ -1,0 +1,20 @@
+# 环境与密钥
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ruff_cache/
+
+# 运行时数据（localstore 插件数据、NapCat 登录态）
+# 用前导 / 限定为仓库根目录，避免误伤 deploy/napcat/
+/data/
+/napcat/
+
+# 日志与临时文件
+*.log
+.DS_Store

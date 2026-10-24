@@ -1,0 +1,39 @@
+[project]
+name = "nuonuo"
+version = "0.1.0"
+description = "诺诺 —— 基于 NoneBot2 的 QQ 机器人（内置 SUES 校园账单插件）"
+requires-python = ">=3.11"
+dependencies = [
+  "nonebot2[fastapi]>=2.5.0,<3.0.0",
+  "nonebot-adapter-onebot>=2.4.6,<3.0.0",
+  "nonebot-adapter-qq>=1.7.1,<2.0.0",
+  "nonebot-plugin-sues-bill>=1.2.0,<2.0.0",
+  "nonebot-plugin-localstore>=0.7.4,<1.0.0",
+  "nonebot-plugin-apscheduler>=0.5.0,<1.0.0",
+  # bot.py 直接 import dotenv_values（nonebot2 虽已传递依赖，显式声明更稳）
+  "python-dotenv>=1.0.0,<2.0.0",
+]
+
+[dependency-groups]
+dev = [
+  "ruff>=0.15.2,<1.0.0",
+]
+
+# 本仓库是应用而不是可分发库：不要尝试构建/安装自身
+[tool.uv]
+package = false
+
+# NoneBot 由 bot.py 通过 nonebot.load_from_toml("pyproject.toml") 读取
+[tool.nonebot]
+plugin_dirs = []
+builtin_plugins = []
+
+[tool.nonebot.plugins]
+"@store" = ["nonebot_plugin_sues_bill"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "ASYNC", "B", "SIM"]

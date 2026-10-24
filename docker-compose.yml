@@ -1,0 +1,76 @@
+name: nuonuo
+
+services:
+  # ────────────────────────── 诺诺本体 ──────────────────────────
+  # 部署用：只拉镜像，不在此构建。
+  # 需要本机构建时追加 override：docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+  bot:
+    image: ${IMAGE:?IMAGE 未设置：请 cp .env.example .env 并填写 IMAGE}
+    container_name: nuonuo
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      # 插件数据（localstore: SQLite + secret.key）。容器内 uid=10001，
+      # 首次部署需 chown 10001:10001 ./data（deploy/update.sh 会自动处理）
+      - ./data:/app/data
+    ports:
+      - "${BOT_BIND:-127.0.0.1}:${PORT:-8080}:${PORT:-8080}"
+    networks:
+      - nuonuo
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + (os.getenv('PORT') or '8080') + '/healthz', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ────────────────── NapCat（OneBot V11 实现，可选）──────────────────
+  # 启动：docker compose --profile napcat up -d
+  # MODE/ONEBOT_URL 会在首次启动时生成 /app/napcat/config/onebot11.json，
+  # 自动反向连接到 ws://bot:<PORT>/onebot/v11/ws（已存在该文件时不再覆盖）。
+  # 首次登录：看 logs 里的二维码，或 ssh -L 6099:127.0.0.1:6099 后访问 WebUI。
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: nuonuo-napcat
+    profiles: ["napcat"]
+    restart: unless-stopped
+    environment:
+      MODE: reverse_ws
+      ONEBOT_URL: ws://bot:${PORT:-8080}/onebot/v11/ws
+      WEBUI_TOKEN: ${NAPCAT_WEBUI_TOKEN:?请在 .env 中设置 NAPCAT_WEBUI_TOKEN}
+      NAPCAT_UID: ${NAPCAT_UID:-1000}
+      NAPCAT_GID: ${NAPCAT_GID:-1000}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      # WebUI 仅本机可访问，扫码/配置走 SSH 隧道
+      - "127.0.0.1:6099:6099"
+    volumes:
+      - ./napcat/config:/app/napcat/config
+      - ./napcat/qq:/app/.config/QQ
+      - ./napcat/plugins:/app/napcat/plugins
+    depends_on:
+      bot:
+        condition: service_healthy
+    networks:
+      - nuonuo
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  nuonuo:
+    driver: bridge

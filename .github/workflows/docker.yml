@@ -1,0 +1,207 @@
+name: docker
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: 构建平台；ACR 个人版若不支持多架构，改成 linux/amd64
+        required: false
+        default: linux/amd64,linux/arm64
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  PLATFORMS: linux/amd64,linux/arm64
+
+jobs:
+  build:
+    name: 构建并推送镜像
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      ghcr_image: ${{ steps.vars.outputs.ghcr_image }}
+      tags: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 计算镜像地址
+        id: vars
+        run: |
+          # GHCR 只接受小写仓库名；镜像名与仓库名保持一致，避免两个 registry 路径分叉
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "ghcr_image=$image" >> "$GITHUB_OUTPUT"
+          echo "image_name=${GITHUB_REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
+      # fork PR 拿不到 secrets；同仓库 PR 也不需要推送，跳过避免无谓注入
+      - name: 检查并规范化 ACR 配置
+        id: acr
+        if: github.event_name != 'pull_request'
+        env:
+          ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
+          ACR_NAMESPACE: ${{ secrets.ACR_NAMESPACE }}
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # 允许 ACR_REGISTRY 误写成 https://xxx/ 的形式
+          registry="${ACR_REGISTRY#*://}"
+          registry="${registry%/}"
+          namespace="${ACR_NAMESPACE%%/*}"
+          if [ -n "$registry" ] && [ -n "$namespace" ] \
+             && [ -n "$ACR_USERNAME" ] && [ -n "$ACR_PASSWORD" ]; then
+            {
+              echo "enabled=true"
+              echo "registry=$registry"
+              echo "namespace=$namespace"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::未配置 ACR 凭据，本次只推送到 GHCR"
+          fi
+
+      - name: 设置 QEMU（arm64 模拟）
+        uses: docker/setup-qemu-action@v3
+
+      - name: 设置 Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 登录阿里云 ACR
+        if: github.event_name != 'pull_request' && steps.acr.outputs.enabled == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.acr.outputs.registry }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: 生成镜像标签
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.vars.outputs.ghcr_image }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=nuonuo
+            org.opencontainers.image.description=诺诺 - NoneBot2 QQ 机器人（内置 SUES 校园账单插件）
+
+      - name: 构建并推送
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ inputs.platforms || env.PLATFORMS }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      - name: 同步镜像到阿里云 ACR
+        if: github.event_name != 'pull_request' && steps.acr.outputs.enabled == 'true'
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          IMAGE_NAME: ${{ steps.vars.outputs.image_name }}
+          ACR_REGISTRY: ${{ steps.acr.outputs.registry }}
+          ACR_NAMESPACE: ${{ steps.acr.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          # 直接复制 manifest list，不重复构建
+          echo "$TAGS" | while IFS= read -r src; do
+            [ -z "$src" ] && continue
+            tag="${src##*:}"
+            dst="${ACR_REGISTRY}/${ACR_NAMESPACE}/${IMAGE_NAME}:${tag}"
+            echo "::group::复制 ${src} -> ${dst}"
+            docker buildx imagetools create --tag "$dst" "$src"
+            echo "::endgroup::"
+          done
+
+  smoke:
+    name: 镜像冒烟测试
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 1) 依赖冒烟：能 import 说明 ddddocr/onnxruntime/libgomp 等运行期依赖齐全
+      - name: 依赖冒烟（加载插件）
+        env:
+          IMAGE: ${{ needs.build.outputs.ghcr_image }}:sha-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -e DRIVER=~fastapi \
+            -e ENABLE_ONEBOT_V11=true \
+            "$IMAGE" \
+            python -c "import nonebot; nonebot.init(); nonebot.load_plugin('nonebot_plugin_sues_bill'); print('sues plugin loaded ok')"
+
+      # 2) 启动冒烟：验证入口、非 root 用户、端口与 /healthz
+      - name: 启动冒烟（探活 /healthz）
+        env:
+          IMAGE: ${{ needs.build.outputs.ghcr_image }}:sha-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker run -d --name nuonuo-smoke \
+            -e DRIVER=~fastapi \
+            -e ENABLE_ONEBOT_V11=true \
+            -e HOST=0.0.0.0 \
+            -e PORT=8080 \
+            -p 18080:8080 \
+            "$IMAGE"
+
+          trap 'docker logs nuonuo-smoke; docker rm -f nuonuo-smoke' EXIT
+
+          ok=""
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/healthz >/dev/null 2>&1; then
+              ok="1"
+              break
+            fi
+            sleep 1
+          done
+
+          if [ -z "$ok" ]; then
+            echo "::error::容器 30 秒内未通过 /healthz 探活"
+            exit 1
+          fi
+
+          docker logs nuonuo-smoke 2>&1 | grep -q 'Succeeded to load plugin "nonebot_plugin_sues_bill"' \
+            || { echo "::error::插件未成功加载"; exit 1; }
+
+          echo "启动冒烟通过"

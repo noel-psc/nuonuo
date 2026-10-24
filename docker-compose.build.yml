@@ -1,0 +1,11 @@
+# 仅本地开发/调试用：在仓库目录里直接从源码构建镜像。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# 服务器部署不要用这个文件（那里没有源码，只拉 ${IMAGE}）。
+services:
+  bot:
+    build:
+      context: .
+      args:
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
