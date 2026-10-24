@@ -144,7 +144,7 @@ docker buildx build \
 
 | Secret | 示例 | 说明 |
 | --- | --- | --- |
-| `ACR_REGISTRY` | `registry.cn-hangzhou.aliyuncs.com` | ACR 访问域名（误写 `https://` 前缀会自动去掉） |
+| `ACR_REGISTRY` | `registry.cn-hangzhou.aliyuncs.com` | ACR 访问域名；个人版新实例形如 `crpi-xxx.cn-shanghai.personal.cr.aliyuncs.com`。**必须用公网域名，不能用 `-vpc` 域名**（GitHub Actions 在外网）。误写 `https://` 前缀会自动去掉 |
 | `ACR_NAMESPACE` | `noel` | ACR 命名空间 |
 | `ACR_USERNAME` | `你的阿里云账号` | ACR 登录用户名 |
 | `ACR_PASSWORD` | `xxxx` | ACR 固定密码（容器镜像服务→访问凭证） |
