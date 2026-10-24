@@ -25,6 +25,7 @@ jobs:
   build:
     name: 构建并推送镜像
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -124,8 +125,9 @@ jobs:
           provenance: false
           sbom: false
 
-      - name: 同步镜像到阿里云 ACR
+      - name: 同步镜像到阿里云 ACR（仅 amd64，失败重试续传）
         if: github.event_name != 'pull_request' && steps.acr.outputs.enabled == 'true'
+        timeout-minutes: 40
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
           IMAGE_NAME: ${{ steps.vars.outputs.image_name }}
@@ -133,14 +135,36 @@ jobs:
           ACR_NAMESPACE: ${{ steps.acr.outputs.namespace }}
         run: |
           set -euo pipefail
-          # 直接复制 manifest list，不重复构建
+
+          # 部署机是 x86：只搬 linux/amd64 子镜像，搬运量从 ~540MB 降到 ~270MB。
+          # 跨境大流量上传偶发 HTTP/2 PROTOCOL_ERROR（对端重置流），重试即可续传：
+          # blob 是内容寻址的，已传完的层会被跳过。
+          copy_one() {
+            local src="$1" dst="$2" repo digest attempt
+            repo="${src%:*}"
+            digest=$(docker buildx imagetools inspect --raw "$src" 2>/dev/null \
+              | jq -r '.manifests[]? | select(.platform.os=="linux" and .platform.architecture=="amd64") | .digest' 2>/dev/null \
+              | head -1) || true
+
+            for attempt in 1 2 3; do
+              echo "::group::[尝试 ${attempt}/3] ${src} -> ${dst}（amd64=${digest:-single-arch}）"
+              if [ -n "${digest:-}" ] && [ "$digest" != "null" ]; then
+                docker buildx imagetools create --tag "$dst" "${repo}@${digest}" && { echo "::endgroup::"; return 0; }
+              else
+                docker buildx imagetools create --tag "$dst" "$src" && { echo "::endgroup::"; return 0; }
+              fi
+              echo "::endgroup::"
+              echo "第 ${attempt} 次失败，$((attempt * 20))s 后重试（已传层会跳过）"
+              sleep $((attempt * 20))
+            done
+            echo "::error::${src} 同步到 ACR 失败（重试 3 次）"
+            return 1
+          }
+
           echo "$TAGS" | while IFS= read -r src; do
             [ -z "$src" ] && continue
             tag="${src##*:}"
-            dst="${ACR_REGISTRY}/${ACR_NAMESPACE}/${IMAGE_NAME}:${tag}"
-            echo "::group::复制 ${src} -> ${dst}"
-            docker buildx imagetools create --tag "$dst" "$src"
-            echo "::endgroup::"
+            copy_one "$src" "${ACR_REGISTRY}/${ACR_NAMESPACE}/${IMAGE_NAME}:${tag}"
           done
 
   smoke:
