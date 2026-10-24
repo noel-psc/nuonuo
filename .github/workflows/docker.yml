@@ -199,7 +199,9 @@ jobs:
             exit 1
           fi
 
-          docker logs nuonuo-smoke 2>&1 | grep -q 'Succeeded to load plugin "nonebot_plugin_sues_bill"' \
-            || { echo "::error::插件未成功加载"; exit 1; }
+          # 先落盘再 grep：pipefail 下 `docker logs | grep -q` 会因 SIGPIPE 返回 141 而误判
+          docker logs nuonuo-smoke > /tmp/smoke.log 2>&1 || true
+          grep -q 'Succeeded to load plugin "nonebot_plugin_sues_bill"' /tmp/smoke.log \
+            || { echo "::error::插件未成功加载"; tail -50 /tmp/smoke.log; exit 1; }
 
           echo "启动冒烟通过"
