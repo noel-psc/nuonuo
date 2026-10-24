@@ -37,6 +37,7 @@ nuonuo/
 ├── .vscode/extensions.json    # 推荐扩展
 ├── deploy/
 │   ├── napcat/onebot11.sample.json   # 反向 WS 配置样例（环境变量失效时用）
+│   ├── restore.sh                    # 从旧部署备份恢复插件数据
 │   └── update.sh                     # 服务器更新/回滚（含目录属主修正）
 └── .github/workflows/docker.yml      # 双推 GHCR + ACR + 依赖/启动双重冒烟
 ```
@@ -236,6 +237,52 @@ WITH_NAPCAT=1 ./deploy/update.sh                                # 连同 NapCat 
 - 备份：`tar czf nuonuo-data-$(date +%F).tar.gz data/`。
 - ⚠️ `secret.key` 丢失会导致已保存的加密凭据无法解密，必须一起备份。
 - 恢复：停容器 → 解包回 `./data` → `sudo chown -R 10001:10001 data` → 起容器。
+
+### 从旧服务器迁移数据
+
+旧部署的 `data/nonebot_plugin_sues_bill/` 与容器内 `/app/data/nonebot_plugin_sues_bill/`
+一一对应（镜像固定 `LOCALSTORE_DATA_DIR=/app/data`），直接拷贝即可：
+
+```bash
+# 1. 旧数据传到服务器，例如 /opt/nuonuo/backup/data/nonebot_plugin_sues_bill/
+rsync -av 旧机:/srv/bot/nuonuo/data /opt/nuonuo/backup/
+
+# 2. 停服 → 留档 → 恢复 → 修正属主 → 起服
+cd /opt/nuonuo
+WITH_NAPCAT=1 ./deploy/restore.sh /opt/nuonuo/backup/data
+```
+
+脚本等价于：
+
+```bash
+docker compose stop bot
+cp -a data "data.bak.$(date +%Y%m%d-%H%M%S)"          # 现网数据留一份
+cp -a /path/to/backup/data/nonebot_plugin_sues_bill/. data/nonebot_plugin_sues_bill/
+sudo chown -R 10001:10001 data                       # 容器内 bot 是 uid 10001
+docker compose up -d
+```
+
+恢复要点：
+
+- **必须拷 `secret.key`**（44 字节 Fernet key）：丢了它，`campus_accounts.encrypted_password`
+  解不开，只能让用户重新 `#设置校园卡账号`。
+- 旧 `user_*.json` 是历史遗留：库里 `metadata.legacy_json_imported=1`，不会再导入，可留可删。
+- 备份里只有本插件数据。旧部署的其他插件（status / mcqq 等）不在本镜像里——先用
+  `nb plugin install` 装回、重建镜像，再把各自 `data/<插件名>/` 拷回。
+- 旧 `.env.prod` 不能直接复用：按新 `.env.example` 重填 `SUPERUSERS`、`QQ_BOTS`、
+  `ONEBOT_ACCESS_TOKEN`、`NICKNAME`、`COMMAND_START` 等；旧的 `LOCALSTORE_USE_CWD`
+  不需要（镜像已固定数据目录）。
+- 旧部署若跑的是插件的 git 分支，确认该分支已并入 `1.2.0`；备份库 schema 与 1.2.0
+  已核对一致（`metadata.schema_version=1`）。
+
+恢复后验证：
+
+```bash
+docker compose logs -f bot      # sues_bill 插件 SUCCESS，且无 migration 报错
+docker compose exec bot python -c "import sqlite3;c=sqlite3.connect('/app/data/nonebot_plugin_sues_bill/sues_bill.sqlite3');print({t:c.execute(f'select count(*) from {t}').fetchone()[0] for t in ['bot_users','room_subscriptions','room_snapshots','campus_accounts']})"
+```
+
+然后在群里发 `#电费` / `#耗电历史` 验证数据是否回来。
 
 ## 常见问题
 
