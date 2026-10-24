@@ -1,6 +1,6 @@
 version = 1
 revision = 3
-requires-python = ">=3.11"
+requires-python = ">=3.11, <4.0"
 resolution-markers = [
     "python_full_version >= '3.12'",
     "python_full_version < '3.12'",
@@ -969,11 +969,8 @@ source = { virtual = "." }
 dependencies = [
     { name = "nonebot-adapter-onebot" },
     { name = "nonebot-adapter-qq" },
-    { name = "nonebot-plugin-apscheduler" },
-    { name = "nonebot-plugin-localstore" },
     { name = "nonebot-plugin-sues-bill" },
     { name = "nonebot2", extra = ["fastapi"] },
-    { name = "python-dotenv" },
 ]
 
 [package.dev-dependencies]
@@ -985,11 +982,8 @@ dev = [
 requires-dist = [
     { name = "nonebot-adapter-onebot", specifier = ">=2.4.6,<3.0.0" },
     { name = "nonebot-adapter-qq", specifier = ">=1.7.1,<2.0.0" },
-    { name = "nonebot-plugin-apscheduler", specifier = ">=0.5.0,<1.0.0" },
-    { name = "nonebot-plugin-localstore", specifier = ">=0.7.4,<1.0.0" },
     { name = "nonebot-plugin-sues-bill", specifier = ">=1.2.0,<2.0.0" },
     { name = "nonebot2", extras = ["fastapi"], specifier = ">=2.5.0,<3.0.0" },
-    { name = "python-dotenv", specifier = ">=1.0.0,<2.0.0" },
 ]
 
 [package.metadata.requires-dev]

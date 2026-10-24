@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# 诺诺 运行镜像：多阶段 + uv，最终镜像只含 venv 与 bot.py。
+# 诺诺 运行镜像：多阶段 + uv，最终镜像只含 venv、bot.py 与 src/plugins。
 # 支持 linux/amd64 与 linux/arm64（ddddocr/onnxruntime 均有对应 wheel）。
 #
 # ⚠️ 两个阶段必须同为 Debian bookworm（python:3.12-slim-bookworm 系），
@@ -32,6 +32,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:${PATH}" \
     HOST=0.0.0.0 \
+    DRIVER=~fastapi+~httpx+~websockets \
     LOCALSTORE_DATA_DIR=/app/data \
     TZ=Asia/Shanghai
 
@@ -53,6 +54,7 @@ WORKDIR /app
 
 COPY --from=builder --chown=nuonuo:nuonuo /app/.venv /app/.venv
 COPY --chown=nuonuo:nuonuo bot.py pyproject.toml ./
+COPY --chown=nuonuo:nuonuo src ./src
 
 USER nuonuo
 

@@ -166,8 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm \
-            -e DRIVER=~fastapi \
-            -e ENABLE_ONEBOT_V11=true \
+            -e DRIVER=~fastapi+~httpx+~websockets \
             "$IMAGE" \
             python -c "import nonebot; nonebot.init(); nonebot.load_plugin('nonebot_plugin_sues_bill'); print('sues plugin loaded ok')"
 
@@ -178,8 +177,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run -d --name nuonuo-smoke \
-            -e DRIVER=~fastapi \
-            -e ENABLE_ONEBOT_V11=true \
+            -e DRIVER=~fastapi+~httpx+~websockets \
             -e HOST=0.0.0.0 \
             -e PORT=8080 \
             -p 18080:8080 \
