@@ -17,6 +17,16 @@ set -euo pipefail
 : "${ACR_NAMESPACE:?请先 export ACR_NAMESPACE}"
 
 SOURCE="${NAPCAT_SOURCE:-mlikiowa/napcat-docker}"
+
+# 短名会被 podman/docker 的 search registries 改写（Fedora 上会去
+# registry.fedoraproject.org 找 mlikiowa/napcat-docker，必然 manifest unknown），
+# 这里统一补全成 docker.io 全名。
+_first="${SOURCE%%/*}"
+case "$_first" in
+  *[.:]* | localhost) ;;
+  *) SOURCE="docker.io/${SOURCE}" ;;
+esac
+unset _first
 PLATFORM="${PLATFORM:-linux/amd64}"
 tag="${1:-latest}"
 dst_repo="${ACR_REGISTRY}/${ACR_NAMESPACE}/napcat-docker"
