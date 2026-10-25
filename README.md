@@ -160,17 +160,18 @@ docker buildx build \
 - `v1.2.3`：`1.2.3` + `1.2` + `v1.2.3` + `sha-...`
 - PR：只验证构建，不推送；ACR 凭据检查与登录也跳过
 - `workflow_dispatch` 手动触发时可指定 `platforms`（ACR 个人版若不支持多架构，填 `linux/amd64`）
-- 构建完成后自动把 GHCR 的 manifest list 原样复制到 ACR（不重复构建）
+- 构建完成后由独立 `acr-sync` job 把 GHCR 的 amd64 镜像复制到 ACR（失败只标黄，不拖红流水线）
 - `smoke` job 先做依赖冒烟（`nonebot.load_plugin("nonebot_plugin_sues_bill")`），
   再真起容器探活 `/healthz` 并校验插件加载日志
 
-### 3. 同步到 ACR（在**国内机器**上执行）
+### 3. 同步到 ACR
 
-> ⚠️ 不要指望 CI 直接推 ACR：GitHub 托管 runner（美国）到阿里云上海的公网链路，
-> 在百 MB 级上传时会被边缘节点重置（`HTTP/2 PROTOCOL_ERROR: received from peer`），
-> 实测 3 次重试都在 8~10 分钟后失败。CI 里该步骤已默认关闭（`vars.ACR_SYNC_IN_CI=true` 才启用）。
+CI 里有一个独立的 `acr-sync` job 会自动尝试把镜像复制到 ACR。但要注意：
+**GitHub 托管 runner（美国）→ 阿里云上海的公网链路，在百 MB 级上传时会被边缘节点重置**
+（`HTTP/2 PROTOCOL_ERROR: received from peer`），实测多次重试都在 8~10 分钟后失败。
+所以这个 job 设了 `continue-on-error`：失败只是标黄，不影响 GHCR 产物和冒烟测试。
 
-在笔记本或 ECS 上同步（国内 → 上海，通常几十秒）：
+兜底：在国内笔记本 / ECS 上手动同步（几十秒）：
 
 ```bash
 export ACR_REGISTRY=crpi-xxx.cn-shanghai.personal.cr.aliyuncs.com
@@ -182,8 +183,8 @@ docker login "$ACR_REGISTRY" -u <阿里云账号>
 ./deploy/sync-acr.sh latest sha-abc123        # 同步指定 tag
 ```
 
-彻底自动化的话，在 ECS 上装一个 GitHub self-hosted runner：构建产物在 VPC 内直推 ACR
-是秒级，届时把 `vars.ACR_SYNC_IN_CI` 设为 `true` 打开 CI 同步即可。
+根治方案：在 ECS 上装一个 GitHub self-hosted runner，VPC 内直推 ACR 是秒级；
+把 `acr-sync` job 的 `runs-on` 改成该 runner 即可。
 
 ## 服务器部署
 
