@@ -31,7 +31,11 @@ jobs:
       packages: write
     outputs:
       ghcr_image: ${{ steps.vars.outputs.ghcr_image }}
+      image_name: ${{ steps.vars.outputs.image_name }}
       tags: ${{ steps.meta.outputs.tags }}
+      acr_enabled: ${{ steps.acr.outputs.enabled }}
+      acr_registry: ${{ steps.acr.outputs.registry }}
+      acr_namespace: ${{ steps.acr.outputs.namespace }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -125,26 +129,47 @@ jobs:
           provenance: false
           sbom: false
 
-      # GitHub(美国) → 阿里云(上海) 公网链路在百 MB 级上传时会被边缘节点重置
-      # （HTTP/2 PROTOCOL_ERROR），重试也无法续传。这里失败不阻塞整体流水线：
-      # GHCR 镜像可用，ACR 用 deploy/sync-acr.sh 在国内机器同步。
-      - name: 同步镜像到阿里云 ACR（仅 amd64，失败不阻塞）
-        # 默认关闭：跨境链路不可用时每次会白等 30 分钟。
-        # 配好国内 self-hosted runner 后，在仓库 Variables 里设 ACR_SYNC_IN_CI=true 再开。
-        if: github.event_name != 'pull_request' && steps.acr.outputs.enabled == 'true' && vars.ACR_SYNC_IN_CI == 'true'
-        timeout-minutes: 40
-        continue-on-error: true
+  # GitHub 托管 runner（美国）→ 阿里云上海的公网链路，在百 MB 级上传时会被
+  # 边缘节点重置（HTTP/2 PROTOCOL_ERROR），重试也无法续传。
+  # 因此把 ACR 同步拆成独立 job：成功就同步，失败只标黄不影响 GHCR 与冒烟。
+  # 根治方案是在国内 ECS 上跑 self-hosted runner（VPC 内直推 ACR）。
+  acr-sync:
+    name: 同步到阿里云 ACR
+    needs: build
+    if: github.event_name != 'pull_request' && needs.build.outputs.acr_enabled == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: 设置 Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 GHCR（读取镜像）
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 登录阿里云 ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ needs.build.outputs.acr_registry }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: 复制 linux/amd64 镜像到 ACR
         env:
-          TAGS: ${{ steps.meta.outputs.tags }}
-          IMAGE_NAME: ${{ steps.vars.outputs.image_name }}
-          ACR_REGISTRY: ${{ steps.acr.outputs.registry }}
-          ACR_NAMESPACE: ${{ steps.acr.outputs.namespace }}
+          TAGS: ${{ needs.build.outputs.tags }}
+          IMAGE_NAME: ${{ needs.build.outputs.image_name }}
+          ACR_REGISTRY: ${{ needs.build.outputs.acr_registry }}
+          ACR_NAMESPACE: ${{ needs.build.outputs.acr_namespace }}
         run: |
           set -euo pipefail
 
-          # 部署机是 x86：只搬 linux/amd64 子镜像，搬运量从 ~540MB 降到 ~270MB。
-          # 跨境大流量上传偶发 HTTP/2 PROTOCOL_ERROR（对端重置流），重试即可续传：
-          # blob 是内容寻址的，已传完的层会被跳过。
           copy_one() {
             local src="$1" dst="$2" repo digest attempt
             repo="${src%:*}"
@@ -152,18 +177,17 @@ jobs:
               | jq -r '.manifests[]? | select(.platform.os=="linux" and .platform.architecture=="amd64") | .digest' 2>/dev/null \
               | head -1) || true
 
-            for attempt in 1 2 3; do
-              echo "::group::[尝试 ${attempt}/3] ${src} -> ${dst}（amd64=${digest:-single-arch}）"
+            for attempt in 1 2; do
+              echo "::group::[尝试 ${attempt}/2] ${src} -> ${dst}（amd64=${digest:-single-arch}）"
               if [ -n "${digest:-}" ] && [ "$digest" != "null" ]; then
                 docker buildx imagetools create --tag "$dst" "${repo}@${digest}" && { echo "::endgroup::"; return 0; }
               else
                 docker buildx imagetools create --tag "$dst" "$src" && { echo "::endgroup::"; return 0; }
               fi
               echo "::endgroup::"
-              echo "第 ${attempt} 次失败，$((attempt * 20))s 后重试（已传层会跳过）"
               sleep $((attempt * 20))
             done
-            echo "::error::${src} 同步到 ACR 失败（重试 3 次）"
+            echo "::warning::${src} 同步到 ACR 失败（跨境链路问题，可改用 deploy/sync-acr.sh 在国内同步）"
             return 1
           }
 
