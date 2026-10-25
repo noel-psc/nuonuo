@@ -38,6 +38,7 @@ nuonuo/
 ├── deploy/
 │   ├── napcat/onebot11.sample.json   # 反向 WS 配置样例（环境变量失效时用）
 │   ├── restore.sh                    # 从旧部署备份恢复插件数据
+│   ├── sync-acr.sh                   # 在国内机器把 GHCR 镜像同步到 ACR
 │   └── update.sh                     # 服务器更新/回滚（含目录属主修正）
 └── .github/workflows/docker.yml      # 双推 GHCR + ACR + 依赖/启动双重冒烟
 ```
@@ -162,6 +163,27 @@ docker buildx build \
 - 构建完成后自动把 GHCR 的 manifest list 原样复制到 ACR（不重复构建）
 - `smoke` job 先做依赖冒烟（`nonebot.load_plugin("nonebot_plugin_sues_bill")`），
   再真起容器探活 `/healthz` 并校验插件加载日志
+
+### 3. 同步到 ACR（在**国内机器**上执行）
+
+> ⚠️ 不要指望 CI 直接推 ACR：GitHub 托管 runner（美国）到阿里云上海的公网链路，
+> 在百 MB 级上传时会被边缘节点重置（`HTTP/2 PROTOCOL_ERROR: received from peer`），
+> 实测 3 次重试都在 8~10 分钟后失败。CI 里该步骤已默认关闭（`vars.ACR_SYNC_IN_CI=true` 才启用）。
+
+在笔记本或 ECS 上同步（国内 → 上海，通常几十秒）：
+
+```bash
+export ACR_REGISTRY=crpi-xxx.cn-shanghai.personal.cr.aliyuncs.com
+export ACR_NAMESPACE=noel-dev
+docker login ghcr.io -u <github用户名>        # 私有包需要 read:packages 的 PAT
+docker login "$ACR_REGISTRY" -u <阿里云账号>
+
+./deploy/sync-acr.sh                          # 同步 latest
+./deploy/sync-acr.sh latest sha-abc123        # 同步指定 tag
+```
+
+彻底自动化的话，在 ECS 上装一个 GitHub self-hosted runner：构建产物在 VPC 内直推 ACR
+是秒级，届时把 `vars.ACR_SYNC_IN_CI` 设为 `true` 打开 CI 同步即可。
 
 ## 服务器部署
 
