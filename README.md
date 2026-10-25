@@ -39,6 +39,7 @@ nuonuo/
 │   ├── napcat/onebot11.sample.json   # 反向 WS 配置样例（环境变量失效时用）
 │   ├── restore.sh                    # 从旧部署备份恢复插件数据
 │   ├── sync-acr.sh                   # 在国内机器把 GHCR 镜像同步到 ACR
+│   ├── sync-napcat.sh                # 在国内机器把 NapCat 镜像同步到 ACR
 │   └── update.sh                     # 服务器更新/回滚（含目录属主修正）
 └── .github/workflows/docker.yml      # 双推 GHCR + ACR + 依赖/启动双重冒烟
 ```
@@ -230,9 +231,17 @@ sudo chown -R 1000:1000 napcat
 docker compose --profile napcat up -d
 ```
 
-> 国内服务器直连 Docker Hub 拉 `mlikiowa/napcat-docker` 常超时。解决办法：先在能拉到的机器上
-> `podman pull mlikiowa/napcat-docker:latest` → `podman tag` 成 `<ACR>/noel-dev/napcat-docker:latest`
-> → `podman push`，然后在 `.env` 里设 `NAPCAT_IMAGE=<ACR 地址>`；或给 daemon 配 `registry-mirrors`。
+> 国内服务器直连 Docker Hub 拉 `mlikiowa/napcat-docker` 常超时。用脚本在笔记本中转：
+>
+> ```bash
+> export ACR_REGISTRY=crpi-xxx.cn-shanghai.personal.cr.aliyuncs.com
+> export ACR_NAMESPACE=noel-dev
+> ./deploy/sync-napcat.sh v4.18.41      # 推荐固定版本；不带参数则同步 latest
+> ```
+>
+> 然后 `.env` 设 `NAPCAT_IMAGE=<ACR>/noel-dev/napcat-docker:v4.18.41`。
+> 官方更新时重跑脚本 + 服务器 `docker compose pull napcat && up -d` 即可。
+> 也可以给 Docker daemon 配 `registry-mirrors` 让服务器直接拉 Docker Hub。
 
 1. 看二维码：`docker compose --profile napcat logs -f napcat`
 2. 或走 WebUI：`ssh -L 6099:127.0.0.1:6099 <服务器>` 后访问 `http://127.0.0.1:6099`，
