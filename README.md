@@ -230,6 +230,10 @@ sudo chown -R 1000:1000 napcat
 docker compose --profile napcat up -d
 ```
 
+> 国内服务器直连 Docker Hub 拉 `mlikiowa/napcat-docker` 常超时。解决办法：先在能拉到的机器上
+> `podman pull mlikiowa/napcat-docker:latest` → `podman tag` 成 `<ACR>/noel-dev/napcat-docker:latest`
+> → `podman push`，然后在 `.env` 里设 `NAPCAT_IMAGE=<ACR 地址>`；或给 daemon 配 `registry-mirrors`。
+
 1. 看二维码：`docker compose --profile napcat logs -f napcat`
 2. 或走 WebUI：`ssh -L 6099:127.0.0.1:6099 <服务器>` 后访问 `http://127.0.0.1:6099`，
    用 `.env` 里的 `NAPCAT_WEBUI_TOKEN` 登录。
