@@ -42,7 +42,7 @@ services:
   # 自动反向连接到 ws://bot:<PORT>/onebot/v11/ws（已存在该文件时不再覆盖）。
   # 首次登录：看 logs 里的二维码，或 ssh -L 6099:127.0.0.1:6099 后访问 WebUI。
   napcat:
-    # 国内直连 Docker Hub 常超时：可用 \${NAPCAT_IMAGE} 指向 ACR 中转副本
+    # 国内直连 Docker Hub 常超时：可用 ${NAPCAT_IMAGE} 指向 ACR 中转副本
     image: ${NAPCAT_IMAGE:-mlikiowa/napcat-docker:latest}
     container_name: nuonuo-napcat
     profiles: ["napcat"]
